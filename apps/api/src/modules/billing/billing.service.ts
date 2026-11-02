@@ -174,10 +174,12 @@ async function processEvent(event: Stripe.Event) {
 }
 
 async function getUserEmail(userId: string) {
-  return prisma.user.findUnique({ where: { id: userId }, select: { email: true } })?.email ?? '';
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+  return u?.email ?? '';
 }
 async function getUserName(userId: string) {
-  return prisma.user.findUnique({ where: { id: userId }, select: { name: true } })?.name ?? '';
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+  return u?.name ?? '';
 }
 
 /** Painel de uso: contagens do usuário vs limites do plano (MVP: plano grátis 3 buscas / 5 exportações). */

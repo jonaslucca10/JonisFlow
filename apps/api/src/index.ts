@@ -14,7 +14,7 @@ import exportRoutes from './modules/export/export.routes';
 import billingRoutes from './modules/billing/billing.routes';
 import { startBackupScheduler } from './modules/backup/backup';
 
-async function main() {
+export function createApp() {
   const app = express();
 
   // Body parser ANTES das rotas (o webhook usa raw em rota específica)
@@ -37,6 +37,12 @@ async function main() {
   app.use(notFound);
   app.use(errorHandler);
 
+  return app;
+}
+
+export const app = createApp();
+
+async function main() {
   const server = app.listen(config.PORT, '0.0.0.0', () => {
     logger.info({ port: config.PORT }, 'API JonisFlow iniciada');
     if (isProd) startBackupScheduler(); // backup noturno interno em prod
@@ -65,4 +71,7 @@ async function main() {
   process.on('SIGINT', shutdown);
 }
 
-main().catch((e) => { logger.error({ err: String(e) }, 'falha ao iniciar API'); process.exit(1); });
+// Serverless (Vercel): não faz listen — o runtime invoca o app via vercel.json rewrites.
+if (!process.env.VERCEL) {
+  main().catch((e) => { logger.error({ err: String(e) }, 'falha ao iniciar API'); process.exit(1); });
+}
