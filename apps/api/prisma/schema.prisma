@@ -1,0 +1,205 @@
+// JonisFlow — Prisma schema (PostgreSQL)
+// Multi-tenant: toda tabela de usuário carrega user_id (FK CASCADE).
+// Conformidade Google: leads guarda place_id + coordenadas + flags + IA —
+// NENHUMA coluna de nome/endereço do Google em leads. Snapshots TTL-limitados.
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "library" // + PRISMA_CLIENT_FORCE_WASM=1 no generate → engine WASM (sem binary nativo)
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique  // normalizado em lowercase pelo app; idx lower(email) na DB
+  passwordHash    String    @map("password_hash")
+  name            String
+  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sessions       Session[]
+  passwordResets PasswordReset[]
+  subscriptions  Subscription[]
+  searches       Search[]
+  leads          Lead[]
+  exports        Export[]
+  auditLogs      AuditLog[]     @relation("AuditLogUser")
+
+  @@map("users")
+}
+
+model Session {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @unique @map("refresh_token_hash")
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model PasswordReset {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_resets")
+}
+
+model Subscription {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @map("user_id") @db.Uuid
+  gateway             String    // stripe | mercadopago
+  gatewayCustomerId   String    @map("gateway_customer_id")
+  gatewaySubscriptionId String  @unique @map("gateway_subscription_id")
+  status              String    @default("inactive")
+  plan                String    @default("monthly")
+  currentPeriodStart  DateTime? @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd    DateTime? @map("current_period_end") @db.Timestamptz(6)
+  cancelAtPeriodEnd   Boolean   @default(false) @map("cancel_at_period_end")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@index([userId, status])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id               String   @id @default(uuid()) @db.Uuid
+  subscriptionId   String?  @map("subscription_id") @db.Uuid
+  gateway          String   @default("stripe")
+  gatewayPaymentId String?  @map("gateway_payment_id")
+  amount           Decimal  @db.Decimal(12, 2)
+  currency         String   @default("BRL") @db.Char(3)
+  status           String
+  paidAt           DateTime? @map("paid_at") @db.Timestamptz(6)
+  rawPayloadJson   Json     @default("{}") @map("raw_payload_json")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([gateway, gatewayPaymentId], map: "uniq_payment_gateway_id")
+  @@index([subscriptionId, createdAt])
+  @@map("payments")
+}
+
+model Search {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  query        String
+  city         String
+  category     String
+  filtersJson  Json     @default("{}") @map("filters_json")
+  resultsCount Int      @default(0) @map("results_count")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leads  Lead[]
+
+  @@index([userId, createdAt])
+  @@map("searches")
+}
+
+model Lead {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  searchId       String?  @map("search_id") @db.Uuid
+  placeId        String   @map("place_id")
+  lat            Decimal? @db.Decimal(10, 7)
+  lng            Decimal? @db.Decimal(10, 7)
+  websitePresent Boolean  @default(false) @map("website_present")
+  phonePresent   Boolean  @default(false) @map("phone_present")
+  rating         Decimal? @db.Decimal(3, 2)
+  userRatings    Int?     @map("user_ratings")
+  aiScore        Int?     @map("ai_score")
+  aiReason       String?  @map("ai_reason")
+  suggestedPitch  String?  @map("suggested_pitch")
+  aiModel        String?  @map("ai_model")
+  aiPromptVersion String? @map("ai_prompt_version")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  search Search? @relation(fields: [searchId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, placeId])
+  @@index([userId, searchId])
+  @@index([placeId])
+  @@map("leads")
+}
+
+model LeadSnapshot {
+  placeId     String   @id @map("place_id")
+  name        String
+  address     String?
+  phone       String?
+  website     String?
+  rating      Decimal? @db.Decimal(3, 2)
+  userRatings Int?     @map("user_ratings")
+  fetchedAt   DateTime @default(now()) @map("fetched_at") @db.Timestamptz(6)
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@index([expiresAt])
+  @@map("lead_snapshots")
+}
+
+model Export {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  searchId  String?  @map("search_id") @db.Uuid
+  format    String   @default("csv")
+  rowsCount Int      @default(0) @map("rows_count")
+  fileUrl   String?  @map("file_url")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("exports")
+}
+
+model WebhookEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  gateway      String
+  eventId      String   @map("event_id")
+  eventType    String   @map("event_type")
+  payloadJson  Json     @default("{}") @map("payload_json")
+  processedAt  DateTime? @map("processed_at") @db.Timestamptz(6)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([gateway, eventId])
+  @@index([processedAt])
+  @@map("webhook_events")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String
+  entity    String
+  entityId  String?  @map("entity_id")
+  metaJson  Json     @default("{}") @map("meta_json")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User? @relation("AuditLogUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}

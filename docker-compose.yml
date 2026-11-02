@@ -1,0 +1,58 @@
+# JonisFlow — stack local/dev: Postgres, Redis, API, Web
+# Produção: cada serviço deployado separadamente (Vercel/Railway/Render/Fly) + Neon/Supabase.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: jonis
+      POSTGRES_PASSWORD: jonis            # apenas dev; em prod use o gerenciado do provedor
+      POSTGRES_DB: jonisflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jonis -d jonisflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./apps/api
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://jonis:jonis@postgres:5432/jonisflow?schema=public
+      REDIS_URL: redis://redis:6379
+      # O restante vem do .env (docker compose lê automaticamente)
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c "npx --yes prisma migrate deploy && node dist/index.js"
+
+  web:
+    build: ./apps/web
+    environment:
+      # Rewrites do Next enviam /api/* para o serviço API na rede docker
+      NEXT_PUBLIC_API_URL: http://api:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+
+# Segredos — nunca commitar
+.env
+.env.*
+!.env.example
+*.pem
+
+# Logs / uploads / backups
+logs/
+*.log
+backups/
+apps/api/exports/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+next-env.d.ts
+tsconfig.tsbuildinfo
